@@ -1,0 +1,89 @@
+{
+  "physics": {
+    "gravity": 800,
+    "gravityUnit": "px/s²",
+    "jumpVelocity": -300,
+    "jumpVelocityUnit": "px/s",
+    "maxFallSpeed": 600,
+    "maxFallSpeedUnit": "px/s",
+    "maxRiseSpeed": -400,
+    "maxRiseSpeedUnit": "px/s",
+    "referenceFrameMs": 16.67,
+    "maxDeltaTime": 0.05,
+    "maxDeltaTimeUnit": "seconds"
+  },
+  "walls": {
+    "speed": 120,
+    "speedUnit": "px/s",
+    "maxSpeed": 300,
+    "maxSpeedUnit": "px/s",
+    "speedIncrementPerInterval": 10,
+    "speedIncrementUnit": "px/s",
+    "scoreInterval": 5,
+    "width": 50,
+    "widthUnit": "px",
+    "gapSize": 140,
+    "gapSizeUnit": "px",
+    "spacing": 350,
+    "spacingUnit": "px",
+    "minPipeHeight": 50,
+    "minPipeHeightUnit": "px"
+  },
+  "canvas": {
+    "logicalWidth": 400,
+    "logicalHeight": 600,
+    "minCanvasWidth": 300,
+    "minCanvasHeight": 400,
+    "groundHeight": 60
+  },
+  "ghost": {
+    "xPositionRatio": 0.25,
+    "spriteWidth": 32,
+    "spriteHeight": 32,
+    "hitboxRadius": 12,
+    "hitboxType": "circle"
+  },
+  "particles": {
+    "emitInterval": 3,
+    "emitIntervalUnit": "frames",
+    "lifespan": 500,
+    "lifespanUnit": "ms",
+    "minRadius": 2,
+    "maxRadius": 4,
+    "initialOpacity": 0.6,
+    "verticalOffsetRange": 3
+  },
+  "clouds": {
+    "countMin": 3,
+    "countMax": 6,
+    "minSpeed": 0.25,
+    "maxSpeed": 1.0,
+    "minOpacity": 0.3,
+    "maxOpacity": 0.7
+  },
+  "screenShake": {
+    "duration": 300,
+    "durationUnit": "ms",
+    "intensity": 5,
+    "intensityUnit": "px"
+  },
+  "scorePopup": {
+    "duration": 800,
+    "durationUnit": "ms",
+    "rise": 30,
+    "riseUnit": "px"
+  },
+  "audio": {
+    "musicVolume": 0.3
+  },
+  "gameOver": {
+    "restartDelay": 500,
+    "restartDelayUnit": "ms"
+  },
+  "colors": {
+    "sky": "#87CEEB",
+    "ground": "#1a1a3e",
+    "pipe": "#2ecc40",
+    "cloud": "#ffffff"
+  }
+}
