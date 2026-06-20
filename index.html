@@ -2,12 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Flappy Kiro</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #87CEEB; }
-    canvas { display: block; position: absolute; left: 0; top: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #87CEEB;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      position: fixed;
+      top: 0;
+      left: 0;
+    }
+    canvas {
+      display: block;
+      position: absolute;
+      left: 0;
+      top: 0;
+      touch-action: none;
+    }
   </style>
 </head>
 <body>
@@ -178,16 +199,33 @@ function resizeCanvas() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  // Fill the entire viewport — no letterboxing
+  // Fill the entire viewport
   canvas.width = vw;
   canvas.height = vh;
 
-  // Scale based on height to maintain consistent vertical gameplay
-  scale = vh / CONFIG.LOGICAL_HEIGHT;
+  // Determine scale: fit the logical play area within the viewport
+  // On portrait (tall) screens: scale by width so pipes fill the screen width
+  // On landscape (wide) screens: scale by height so the full vertical space is used
+  var scaleByWidth = vw / CONFIG.LOGICAL_WIDTH;
+  var scaleByHeight = vh / CONFIG.LOGICAL_HEIGHT;
 
-  // Center the logical play area horizontally within the full-width canvas
+  // Use the smaller scale to ensure the entire logical area fits
+  // But prioritize: on very narrow portrait screens, scale by width
+  if (vh / vw > CONFIG.LOGICAL_HEIGHT / CONFIG.LOGICAL_WIDTH) {
+    // Portrait-ish: wider relative to game ratio, scale by width
+    scale = scaleByWidth;
+  } else {
+    // Landscape-ish: scale by height
+    scale = scaleByHeight;
+  }
+
+  // Center the logical play area within the viewport
   offsetX = (vw - CONFIG.LOGICAL_WIDTH * scale) / 2;
-  offsetY = 0;
+  offsetY = (vh - CONFIG.LOGICAL_HEIGHT * scale) / 2;
+
+  // Ensure offsets are never negative (clip instead)
+  if (offsetX < 0) offsetX = 0;
+  if (offsetY < 0) offsetY = 0;
 
   canvas.style.left = '0px';
   canvas.style.top = '0px';
@@ -200,6 +238,9 @@ function resizeCanvas() {
 
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', function() {
+  setTimeout(resizeCanvas, 100);
+});
 
 // ═══════════════════════════════════════
 // PHYSICS
@@ -1160,7 +1201,7 @@ function handleCharacterSelectClick(clickX, clickY, e) {
 }
 
 canvas.addEventListener('mousedown', handleInput);
-canvas.addEventListener('touchstart', handleInput);
+canvas.addEventListener('touchstart', handleInput, { passive: false });
 document.addEventListener('keydown', function(e) {
   if (e.code === 'Space') {
     e.preventDefault();
@@ -1171,6 +1212,10 @@ document.addEventListener('keydown', function(e) {
     handleInput(e);
   }
 });
+
+// Prevent default touch behaviors (scroll, zoom) on the document
+document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
 
 function handleResize() {
   // Recalculate canvas dimensions and scale factor without resetting game state.
