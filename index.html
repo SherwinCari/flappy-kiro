@@ -132,6 +132,20 @@ spriteSheet.src = 'assets/ghosty.png';
 const pipeImage = new Image();
 pipeImage.src = 'assets/pipe-clean.png';
 
+// Character images
+const characterImages = {
+  ghosty: new Image(),
+  mario: new Image(),
+  angrybird: new Image(),
+};
+characterImages.ghosty.src = 'assets/ghosty.png';
+characterImages.mario.src = 'assets/mario-clean.png';
+characterImages.angrybird.src = 'assets/angry-bird-clean.png';
+
+// Character selection state
+var selectedCharacter = 'ghosty';
+var showingCharacterSelect = false;
+
 const sounds = {
   jump: new Audio('assets/jump.wav'),
   gameOver: new Audio('assets/game_over.wav'),
@@ -274,13 +288,9 @@ function renderGhost(ctx) {
   ctx.translate(ghost.x + halfW, ghost.y + halfH); // move to sprite center
   ctx.rotate(rotation * Math.PI / 180);             // apply rotation
 
-  if (spriteSheet.complete && spriteSheet.naturalWidth > 0) {
-    // Draw the full ghosty.png image scaled to ghost size
-    ctx.drawImage(
-      spriteSheet,
-      -halfW, -halfH,
-      CONFIG.GHOST_WIDTH, CONFIG.GHOST_HEIGHT
-    );
+  var charImg = characterImages[selectedCharacter];
+  if (charImg && charImg.complete && charImg.naturalWidth > 0) {
+    ctx.drawImage(charImg, -halfW, -halfH, CONFIG.GHOST_WIDTH, CONFIG.GHOST_HEIGHT);
   } else {
     // Fallback: white filled circle
     ctx.fillStyle = '#ffffff';
@@ -744,39 +754,217 @@ function drawRoundedRect(ctx, x, y, w, h, radius) {
 }
 
 function renderMainMenu(ctx) {
-  // Title "FLAPPY KIRO" centered at ~30% from top
-  ctx.font = 'bold 28px sans-serif';
-  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-  ctx.textAlign = 'center';
-  ctx.fillText('FLAPPY KIRO', CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.3);
+  if (showingCharacterSelect) {
+    renderCharacterSelect(ctx);
+    return;
+  }
 
-  // High score display centered at ~65% from top
-  ctx.font = '16px sans-serif';
-  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-  ctx.textAlign = 'center';
-  ctx.fillText('High Score: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.65);
+  var cx = CONFIG.LOGICAL_WIDTH / 2;
+  var now = performance.now();
 
-  // Pulsing instruction text "Tap or click to start" at ~85% from top
-  var pulseOpacity = 0.5 + 0.5 * Math.sin(performance.now() / 500 * Math.PI);
+  // --- Title "FLAPPY KIRO" with shadow, large and prominent ---
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Title shadow
+  ctx.font = 'bold 38px sans-serif';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+  ctx.fillText('FLAPPY KIRO', cx + 2, CONFIG.LOGICAL_HEIGHT * 0.14 + 2);
+
+  // Title
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('FLAPPY KIRO', cx, CONFIG.LOGICAL_HEIGHT * 0.14);
+  ctx.restore();
+
+  // --- Main character (single, centered, large, with gentle floating animation) ---
+  var floatOffset = Math.sin(now / 800) * 6; // gentle float
+  var charImg = characterImages[selectedCharacter];
+  var charSize = 80;
+  var charX = cx - charSize / 2;
+  var charY = CONFIG.LOGICAL_HEIGHT * 0.28 + floatOffset;
+
+  if (charImg && charImg.complete && charImg.naturalWidth > 0) {
+    ctx.drawImage(charImg, charX, charY, charSize, charSize);
+  } else {
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(cx, charY + charSize / 2, charSize / 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- High Score badge (elegant pill shape) ---
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var badgeY = CONFIG.LOGICAL_HEIGHT * 0.48;
+  var badgeW = 140;
+  var badgeH = 32;
+  var badgeX = cx - badgeW / 2;
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+  drawRoundedRect(ctx, badgeX, badgeY, badgeW, badgeH, badgeH / 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.font = '600 14px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('\u2B50 Best: ' + gameState.highScore, cx, badgeY + badgeH / 2);
+  ctx.restore();
+
+  // --- "Choose Your Character" button (polished, larger, with subtle glow) ---
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var btnW = 200;
+  var btnH = 42;
+  var btnX = cx - btnW / 2;
+  var btnY = CONFIG.LOGICAL_HEIGHT * 0.57;
+
+  // Button shadow
+  ctx.fillStyle = 'rgba(39, 174, 55, 0.3)';
+  drawRoundedRect(ctx, btnX + 1, btnY + 3, btnW, btnH, 12);
+  ctx.fill();
+
+  // Button background
+  ctx.fillStyle = '#2ecc40';
+  drawRoundedRect(ctx, btnX, btnY, btnW, btnH, 12);
+  ctx.fill();
+
+  // Button border highlight
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Button text
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('Choose Your Character', cx, btnY + btnH / 2);
+  ctx.restore();
+
+  // --- Pulsing "Tap or Press Space to Start" (centered, noticeable) ---
+  var pulseOpacity = 0.5 + 0.5 * Math.sin(now / 600 * Math.PI);
+  ctx.save();
   ctx.globalAlpha = pulseOpacity;
-  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '600 15px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('Tap or Press Space to Start', cx, CONFIG.LOGICAL_HEIGHT * 0.72);
+  ctx.restore();
+
+  // --- Bottom ground strip (modern, subtle gradient look) ---
+  var groundY = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT;
+  ctx.fillStyle = CONFIG.COLOR_GROUND;
+  drawRoundedRect(ctx, 10, groundY + 5, CONFIG.LOGICAL_WIDTH - 20, CONFIG.GROUND_HEIGHT - 10, 10);
+  ctx.fill();
+
+  // Score display in ground
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '600 13px monospace';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.fillText('Score: 0', cx - 60, groundY + CONFIG.GROUND_HEIGHT / 2);
+  ctx.fillText('High: ' + gameState.highScore, cx + 60, groundY + CONFIG.GROUND_HEIGHT / 2);
+  ctx.restore();
+}
+
+function renderCharacterSelect(ctx) {
+  // Dark overlay
+  ctx.fillStyle = CONFIG.COLOR_UI_BG;
+  ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
+
+  // Panel
+  var panelW = 320;
+  var panelH = 280;
+  var panelX = (CONFIG.LOGICAL_WIDTH - panelW) / 2;
+  var panelY = (CONFIG.LOGICAL_HEIGHT - panelH) / 2;
+  ctx.fillStyle = 'rgba(30, 30, 30, 0.95)';
+  drawRoundedRect(ctx, panelX, panelY, panelW, panelH, 12);
+  ctx.fill();
+
+  // Title
+  ctx.font = 'bold 20px sans-serif';
   ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
   ctx.textAlign = 'center';
-  ctx.fillText('Tap or click to start', CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.85);
-  ctx.globalAlpha = 1.0;
+  ctx.fillText('Choose Your Character', CONFIG.LOGICAL_WIDTH / 2, panelY + 35);
 
-  // Reset text alignment
+  // Character options
+  var characters = [
+    { id: 'ghosty', name: 'Ghosty' },
+    { id: 'mario', name: 'Mario' },
+    { id: 'angrybird', name: 'Angry Bird' },
+  ];
+
+  var startX = panelX + 25;
+  var cardY = panelY + 55;
+  var cardW = 85;
+  var cardH = 120;
+  var gap = 15;
+
+  for (var i = 0; i < characters.length; i++) {
+    var ch = characters[i];
+    var cx = startX + i * (cardW + gap);
+
+    // Card background (highlight selected)
+    if (selectedCharacter === ch.id) {
+      ctx.fillStyle = 'rgba(46, 204, 64, 0.3)';
+      ctx.strokeStyle = '#2ecc40';
+      ctx.lineWidth = 2;
+    } else {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 1;
+    }
+    drawRoundedRect(ctx, cx, cardY, cardW, cardH, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Character image
+    var charImg = characterImages[ch.id];
+    if (charImg && charImg.complete && charImg.naturalWidth > 0) {
+      ctx.drawImage(charImg, cx + cardW / 2 - 25, cardY + 15, 50, 50);
+    }
+
+    // Character name
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+    ctx.textAlign = 'center';
+    ctx.fillText(ch.name, cx + cardW / 2, cardY + cardH - 15);
+  }
+
+  // "Select" / confirm button
+  var btnX = CONFIG.LOGICAL_WIDTH / 2 - 60;
+  var btnY = panelY + panelH - 55;
+  var btnW = 120;
+  var btnH = 34;
+  ctx.fillStyle = '#2ecc40';
+  drawRoundedRect(ctx, btnX, btnY, btnW, btnH, 8);
+  ctx.fill();
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.fillText('Confirm', CONFIG.LOGICAL_WIDTH / 2, btnY + 22);
+
   ctx.textAlign = 'left';
 }
 
 function renderGameOver(ctx) {
+  if (showingCharacterSelect) {
+    renderCharacterSelect(ctx);
+    return;
+  }
+
   // Full-screen semi-transparent dark overlay
   ctx.fillStyle = CONFIG.COLOR_UI_BG;
   ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
 
-  // Centered panel (~280×200px)
+  // Centered panel (~280×240px)
   var panelW = 280;
-  var panelH = 200;
+  var panelH = 240;
   var panelX = (CONFIG.LOGICAL_WIDTH - panelW) / 2;
   var panelY = (CONFIG.LOGICAL_HEIGHT - panelH) / 2;
 
@@ -794,29 +982,40 @@ function renderGameOver(ctx) {
   // "Score: X" below title
   ctx.font = '18px sans-serif';
   ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-  ctx.fillText('Score: ' + gameState.score, CONFIG.LOGICAL_WIDTH / 2, panelY + 80);
+  ctx.fillText('Score: ' + gameState.score, CONFIG.LOGICAL_WIDTH / 2, panelY + 75);
 
   // "Best: X" below score
-  ctx.fillText('Best: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH / 2, panelY + 110);
+  ctx.fillText('Best: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH / 2, panelY + 105);
 
-  // Conditional "New High Score!" in gold if current score equals high score and score > 0
+  // Conditional "New High Score!" in gold
   if (gameState.score > 0 && gameState.score >= gameState.highScore) {
     ctx.font = 'bold 16px sans-serif';
     ctx.fillStyle = CONFIG.COLOR_UI_ACCENT;
-    ctx.fillText('New High Score!', CONFIG.LOGICAL_WIDTH / 2, panelY + 140);
+    ctx.fillText('New High Score!', CONFIG.LOGICAL_WIDTH / 2, panelY + 135);
   }
 
-  // Pulsing restart prompt — only visible after 500ms (RESTART_DELAY)
+  // "Choose Your Character" button
+  var btnX = CONFIG.LOGICAL_WIDTH / 2 - 90;
+  var btnY = panelY + 155;
+  var btnW = 180;
+  var btnH = 30;
+  ctx.fillStyle = '#2ecc40';
+  drawRoundedRect(ctx, btnX, btnY, btnW, btnH, 6);
+  ctx.fill();
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('Choose Your Character', CONFIG.LOGICAL_WIDTH / 2, btnY + 20);
+
+  // Pulsing restart prompt
   if (gameState.gameOverTime !== null && (performance.now() - gameState.gameOverTime) >= CONFIG.RESTART_DELAY) {
     var pulseOpacity = 0.5 + 0.5 * Math.sin(performance.now() / 500 * Math.PI);
     ctx.globalAlpha = pulseOpacity;
     ctx.font = '14px sans-serif';
     ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-    ctx.fillText('Tap or click to restart', CONFIG.LOGICAL_WIDTH / 2, panelY + 175);
+    ctx.fillText('Tap or press Space to restart', CONFIG.LOGICAL_WIDTH / 2, panelY + 220);
     ctx.globalAlpha = 1.0;
   }
 
-  // Reset text alignment
   ctx.textAlign = 'left';
 }
 
@@ -867,6 +1066,48 @@ function handleInput(e) {
 
   userInteracted = true;
 
+  // Get click position in logical coordinates
+  var clickX = 0, clickY = 0;
+  if (e.type === 'touchstart') {
+    var touch = e.touches[0];
+    clickX = (touch.clientX - offsetX) / scale;
+    clickY = (touch.clientY - offsetY) / scale;
+  } else if (e.type === 'mousedown') {
+    clickX = (e.clientX - offsetX) / scale;
+    clickY = (e.clientY - offsetY) / scale;
+  }
+
+  // Handle character select screen
+  if (showingCharacterSelect) {
+    handleCharacterSelectClick(clickX, clickY, e);
+    return;
+  }
+
+  // Handle "Choose Your Character" button click in idle or gameover state
+  if (gameState.state === 'idle' || gameState.state === 'gameover') {
+    if (e.type === 'mousedown' || e.type === 'touchstart') {
+      var btnW = 200;
+      var btnH = 42;
+      var btnX = CONFIG.LOGICAL_WIDTH / 2 - btnW / 2;
+      var btnY;
+      if (gameState.state === 'idle') {
+        btnY = CONFIG.LOGICAL_HEIGHT * 0.57;
+      } else {
+        // gameover panel
+        var panelH = 240;
+        var panelY = (CONFIG.LOGICAL_HEIGHT - panelH) / 2;
+        btnY = panelY + 155;
+        btnW = 180;
+        btnH = 30;
+        btnX = CONFIG.LOGICAL_WIDTH / 2 - btnW / 2;
+      }
+      if (clickX >= btnX && clickX <= btnX + btnW && clickY >= btnY && clickY <= btnY + btnH) {
+        showingCharacterSelect = true;
+        return;
+      }
+    }
+  }
+
   if (gameState.state === 'idle') {
     gameState.state = 'running';
     flap();
@@ -880,11 +1121,53 @@ function handleInput(e) {
   }
 }
 
+function handleCharacterSelectClick(clickX, clickY, e) {
+  var panelW = 320;
+  var panelH = 280;
+  var panelX = (CONFIG.LOGICAL_WIDTH - panelW) / 2;
+  var panelY = (CONFIG.LOGICAL_HEIGHT - panelH) / 2;
+
+  // Character cards
+  var characters = ['ghosty', 'mario', 'angrybird'];
+  var startX = panelX + 25;
+  var cardY = panelY + 55;
+  var cardW = 85;
+  var cardH = 120;
+  var gap = 15;
+
+  for (var i = 0; i < characters.length; i++) {
+    var cx = startX + i * (cardW + gap);
+    if (clickX >= cx && clickX <= cx + cardW && clickY >= cardY && clickY <= cardY + cardH) {
+      selectedCharacter = characters[i];
+      return;
+    }
+  }
+
+  // Confirm button
+  var btnX = CONFIG.LOGICAL_WIDTH / 2 - 60;
+  var btnY = panelY + panelH - 55;
+  var btnW = 120;
+  var btnH = 34;
+  if (clickX >= btnX && clickX <= btnX + btnW && clickY >= btnY && clickY <= btnY + btnH) {
+    showingCharacterSelect = false;
+    return;
+  }
+
+  // Spacebar also confirms
+  if (e && e.code === 'Space') {
+    showingCharacterSelect = false;
+  }
+}
+
 canvas.addEventListener('mousedown', handleInput);
 canvas.addEventListener('touchstart', handleInput);
 document.addEventListener('keydown', function(e) {
   if (e.code === 'Space') {
     e.preventDefault();
+    if (showingCharacterSelect) {
+      showingCharacterSelect = false;
+      return;
+    }
     handleInput(e);
   }
 });
@@ -921,12 +1204,15 @@ function render() {
   // Render layers back-to-front
   renderBackground(ctx);   // Layer 1: Sky
   renderClouds(ctx);       // Layer 2: Clouds (slowest→fastest)
-  renderPipes(ctx);        // Layer 3: Pipes
-  renderGround(ctx);       // Layer 4: Ground
-  renderParticles(ctx);    // Layer 5: Particles
-  renderGhost(ctx);        // Layer 6: Ghost sprite
-  renderScorePopups(ctx);  // Layer 7: Score popups
-  renderScore(ctx);        // Layer 8: HUD
+
+  if (gameState.state !== 'idle') {
+    renderPipes(ctx);        // Layer 3: Pipes
+    renderGround(ctx);       // Layer 4: Ground
+    renderParticles(ctx);    // Layer 5: Particles
+    renderGhost(ctx);        // Layer 6: Ghost sprite
+    renderScorePopups(ctx);  // Layer 7: Score popups
+    renderScore(ctx);        // Layer 8: HUD
+  }
 
   // State-specific overlays
   if (gameState.state === 'gameover') {
