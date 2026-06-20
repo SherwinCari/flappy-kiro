@@ -1,0 +1,13 @@
+{
+  "name": "flappy-kiro",
+  "version": "1.0.0",
+  "description": "Flappy Kiro - retro browser-based endless side-scroller game",
+  "private": true,
+  "scripts": {
+    "test": "jest --run"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "fast-check": "^3.15.0"
+  }
+}

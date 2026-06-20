@@ -6,8 +6,8 @@
   <title>Flappy Kiro</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-    canvas { display: block; margin: auto; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #87CEEB; }
+    canvas { display: block; position: absolute; left: 0; top: 0; }
   </style>
 </head>
 <body>
@@ -18,24 +18,19 @@
 // ═══════════════════════════════════════
 
 const CONFIG = {
-  // Logical coordinate space
   LOGICAL_WIDTH: 400,
   LOGICAL_HEIGHT: 600,
   MIN_CANVAS_WIDTH: 300,
   MIN_CANVAS_HEIGHT: 400,
-
-  // Ghost physics (time-based)
   GHOST_X_RATIO: 0.25,
-  GHOST_WIDTH: 32,
-  GHOST_HEIGHT: 32,
+  GHOST_WIDTH: 48,
+  GHOST_HEIGHT: 48,
   GHOST_HITBOX_RADIUS: 12,
-  FLAP_VELOCITY: -300,
-  GRAVITY: 800,
-  MAX_FALL_SPEED: 600,
-  MAX_RISE_SPEED: -400,
-  MAX_DELTA_TIME: 0.05,
-
-  // Ghost animation
+  FLAP_VELOCITY: -300,        // px/s
+  GRAVITY: 800,               // px/s²
+  MAX_FALL_SPEED: 600,        // px/s
+  MAX_RISE_SPEED: -720,       // px/s
+  MAX_DELTA_TIME: 0.05,       // seconds
   SPRITE_FRAME_WIDTH: 32,
   SPRITE_FRAME_HEIGHT: 32,
   ANIM_IDLE_FRAMES: [0, 1],
@@ -43,51 +38,34 @@ const CONFIG = {
   ANIM_FLAP_FRAMES: [2, 3, 4],
   ANIM_FLAP_FRAME_DURATION: 80,
   ANIM_DEATH_FRAMES: [5],
-
-  // Pipes (time-based)
+  ANIM_DEATH_FRAME_DURATION: 0,
   PIPE_WIDTH: 50,
   GAP_HEIGHT: 140,
   SPAWN_SPACING: 350,
   MIN_PIPE_HEIGHT: 50,
-  BASE_PIPE_SPEED: 120,
-  MAX_PIPE_SPEED: 300,
-  SPEED_INCREMENT: 10,
+  BASE_PIPE_SPEED: 120,       // px/s
+  MAX_PIPE_SPEED: 300,        // px/s
+  SPEED_INCREMENT: 6,         // px/s per 5 points
   SCORE_INTERVAL: 5,
-
-  // Ground
   GROUND_HEIGHT: 60,
-
-  // Particles
   PARTICLE_EMIT_INTERVAL: 3,
   PARTICLE_LIFESPAN: 500,
   PARTICLE_MIN_RADIUS: 2,
   PARTICLE_MAX_RADIUS: 4,
   PARTICLE_INITIAL_OPACITY: 0.6,
   PARTICLE_OFFSET_RANGE: 3,
-
-  // Clouds
   CLOUD_COUNT_MIN: 3,
   CLOUD_COUNT_MAX: 6,
   CLOUD_MIN_SPEED: 15,
   CLOUD_MAX_SPEED: 60,
   CLOUD_MIN_OPACITY: 0.3,
   CLOUD_MAX_OPACITY: 0.7,
-
-  // Screen shake
   SHAKE_DURATION: 300,
   SHAKE_INTENSITY: 5,
-
-  // Score popup
   POPUP_DURATION: 800,
   POPUP_RISE: 30,
-
-  // Audio
   MUSIC_VOLUME: 0.3,
-
-  // Game over
   RESTART_DELAY: 500,
-
-  // Colors
   COLOR_SKY: '#87CEEB',
   COLOR_GROUND: '#1a1a3e',
   COLOR_PIPE: '#2ecc40',
@@ -102,887 +80,913 @@ const CONFIG = {
 // ═══════════════════════════════════════
 
 const gameState = {
-  current: 'idle', // 'idle' | 'running' | 'gameover'
+  state: 'idle',
+  ghost: {
+    x: CONFIG.LOGICAL_WIDTH * CONFIG.GHOST_X_RATIO,
+    y: CONFIG.LOGICAL_HEIGHT / 2 - CONFIG.GHOST_HEIGHT / 2,
+    vy: 0,
+    sprite: {
+      currentAnim: 'idle',
+      frameIndex: 0,
+      elapsed: 0,
+      currentFrame: 0,
+    },
+  },
+  pipes: [],
+  particles: [],
+  scorePopups: [],
+  clouds: [],
   score: 0,
   highScore: 0,
   gameOverTime: null,
+  shake: { active: false, elapsed: 0, offsetX: 0, offsetY: 0 },
   lastTimestamp: null,
   frameCount: 0,
+};
 
-  transition(newState) {
-    this.current = newState;
-  },
-
-  canRestart() {
-    return this.current === 'gameover' &&
-      (performance.now() - this.gameOverTime) >= CONFIG.RESTART_DELAY;
+// Initialize high score from localStorage
+(function() {
+  try {
+    gameState.highScore = parseInt(localStorage.getItem('flappyKiro_highScore'), 10) || 0;
+  } catch (e) {
+    gameState.highScore = 0;
   }
+})();
+
+// Initialize clouds after gameState is defined
+initClouds();
+
+const ANIMATIONS = {
+  idle: { frames: CONFIG.ANIM_IDLE_FRAMES, frameDuration: CONFIG.ANIM_IDLE_FRAME_DURATION },
+  flap: { frames: CONFIG.ANIM_FLAP_FRAMES, frameDuration: CONFIG.ANIM_FLAP_FRAME_DURATION },
+  death: { frames: CONFIG.ANIM_DEATH_FRAMES, frameDuration: CONFIG.ANIM_DEATH_FRAME_DURATION },
 };
 
 // ═══════════════════════════════════════
-// GHOST (Player Character)
+// ASSETS
 // ═══════════════════════════════════════
 
-const ghost = {
-  x: 0,
-  y: 0,
-  vy: 0,
-  width: CONFIG.GHOST_WIDTH,
-  height: CONFIG.GHOST_HEIGHT,
+const spriteSheet = new Image();
+spriteSheet.src = 'assets/ghosty.png';
 
-  // Sprite animation
-  sprite: {
-    image: null,
-    isLoaded: false,
-    currentAnim: 'idle',
-    frameIndex: 0,
-    currentFrame: 0,
-    elapsed: 0,
-  },
+const pipeImage = new Image();
+pipeImage.src = 'assets/pipe-clean.png';
 
-  // Animation definitions
-  animations: {
-    idle: { frames: CONFIG.ANIM_IDLE_FRAMES, frameDuration: CONFIG.ANIM_IDLE_FRAME_DURATION },
-    flap: { frames: CONFIG.ANIM_FLAP_FRAMES, frameDuration: CONFIG.ANIM_FLAP_FRAME_DURATION },
-    death: { frames: CONFIG.ANIM_DEATH_FRAMES, frameDuration: 0 },
-  },
+const sounds = {
+  jump: new Audio('assets/jump.wav'),
+  gameOver: new Audio('assets/game_over.wav'),
+  score: new Audio('assets/score.wav'),
+  music: new Audio('assets/background_music.mp3'),
+};
 
-  reset(logicalWidth, logicalHeight) {
-    this.x = logicalWidth * CONFIG.GHOST_X_RATIO;
-    this.y = logicalHeight / 2 - this.height / 2;
-    this.vy = 0;
-    this.sprite.currentAnim = 'idle';
-    this.sprite.frameIndex = 0;
-    this.sprite.currentFrame = 0;
-    this.sprite.elapsed = 0;
-  },
+// Audio preloading configuration
+sounds.jump.preload = 'auto';
+sounds.jump.volume = 0.5;
+sounds.gameOver.preload = 'auto';
+sounds.gameOver.volume = 0.7;
+sounds.score.preload = 'auto';
+sounds.score.volume = 0.6;
+sounds.music.preload = 'auto';
+sounds.music.volume = CONFIG.MUSIC_VOLUME;
+sounds.music.loop = true;
 
-  flap() {
-    this.vy = CONFIG.FLAP_VELOCITY;
-    this.setAnimState('flap');
-  },
+// ═══════════════════════════════════════
+// CANVAS SETUP
+// ═══════════════════════════════════════
 
-  applyGravity(dt) {
-    this.vy += CONFIG.GRAVITY * dt;
-  },
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
 
-  clampVelocity() {
-    this.vy = Math.max(CONFIG.MAX_RISE_SPEED, Math.min(this.vy, CONFIG.MAX_FALL_SPEED));
-  },
+function resizeCanvas() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
 
-  updatePosition(dt) {
-    this.y += this.vy * dt;
-  },
+  // Fill the entire viewport — no letterboxing
+  canvas.width = vw;
+  canvas.height = vh;
 
-  clampToCanvas() {
-    if (this.y < 0) {
-      this.y = 0;
-      this.vy = 0;
-    }
-  },
+  // Scale based on height to maintain consistent vertical gameplay
+  scale = vh / CONFIG.LOGICAL_HEIGHT;
 
-  getHitbox() {
-    return {
-      cx: this.x + 16,
-      cy: this.y + 16,
-      radius: CONFIG.GHOST_HITBOX_RADIUS,
-    };
-  },
+  // Center the logical play area horizontally within the full-width canvas
+  offsetX = (vw - CONFIG.LOGICAL_WIDTH * scale) / 2;
+  offsetY = 0;
 
-  getRotation() {
-    if (this.vy < 0) return -10;
-    if (this.vy > 0) return Math.min((this.vy / CONFIG.MAX_FALL_SPEED) * 10, 10);
-    return 0;
-  },
+  canvas.style.left = '0px';
+  canvas.style.top = '0px';
+  canvas.style.width = vw + 'px';
+  canvas.style.height = vh + 'px';
 
-  setAnimState(state) {
-    if (this.sprite.currentAnim === state) return;
-    this.sprite.currentAnim = state;
-    this.sprite.frameIndex = 0;
-    this.sprite.elapsed = 0;
-    this.sprite.currentFrame = this.animations[state].frames[0];
-  },
+  document.documentElement.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden';
+}
 
-  updateAnimation(dtMs) {
-    const anim = this.animations[this.sprite.currentAnim];
-    if (anim.frameDuration === 0) return; // death holds frame
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
-    this.sprite.elapsed += dtMs;
-    if (this.sprite.elapsed >= anim.frameDuration) {
-      this.sprite.elapsed -= anim.frameDuration;
-      this.sprite.frameIndex++;
+// ═══════════════════════════════════════
+// PHYSICS
+// ═══════════════════════════════════════
 
-      if (this.sprite.frameIndex >= anim.frames.length) {
-        if (this.sprite.currentAnim === 'idle') {
-          this.sprite.frameIndex = 0;
-        } else if (this.sprite.currentAnim === 'flap') {
-          this.sprite.currentAnim = 'idle';
-          this.sprite.frameIndex = 0;
-        }
+function updateGhostAnimation(dtMs) {
+  var sprite = gameState.ghost.sprite;
+  var anim = ANIMATIONS[sprite.currentAnim];
+
+  // Death holds indefinitely — no frame advancement
+  if (sprite.currentAnim === 'death') return;
+
+  sprite.elapsed += dtMs;
+  if (sprite.elapsed >= anim.frameDuration) {
+    sprite.elapsed -= anim.frameDuration;
+    sprite.frameIndex++;
+
+    if (sprite.frameIndex >= anim.frames.length) {
+      if (sprite.currentAnim === 'idle') {
+        sprite.frameIndex = 0; // loop
+      } else if (sprite.currentAnim === 'flap') {
+        // Flap completed — return to idle
+        sprite.currentAnim = 'idle';
+        sprite.frameIndex = 0;
+        sprite.elapsed = 0;
       }
-      this.sprite.currentFrame = this.animations[this.sprite.currentAnim].frames[this.sprite.frameIndex];
     }
-  },
+  }
+  sprite.currentFrame = ANIMATIONS[sprite.currentAnim].frames[sprite.frameIndex];
+}
 
-  update(dt) {
-    this.applyGravity(dt);
-    this.clampVelocity();
-    this.updatePosition(dt);
-    this.clampToCanvas();
-    this.updateAnimation(dt * 1000);
-  },
-};
+function setGhostAnimState(state) {
+  var sprite = gameState.ghost.sprite;
+  if (sprite.currentAnim === state) return;
+  sprite.currentAnim = state;
+  sprite.frameIndex = 0;
+  sprite.elapsed = 0;
+  sprite.currentFrame = ANIMATIONS[state].frames[0];
+}
 
-// ═══════════════════════════════════════
-// PIPES (Wall Obstacles)
-// ═══════════════════════════════════════
+function getGhostHitbox() {
+  var ghost = gameState.ghost;
+  return {
+    cx: ghost.x + CONFIG.GHOST_WIDTH / 2,
+    cy: ghost.y + CONFIG.GHOST_HEIGHT / 2,
+    radius: CONFIG.GHOST_HITBOX_RADIUS,
+  };
+}
 
-const pipeManager = {
-  pipes: [],
+function updateGhost(dt) {
+  var ghost = gameState.ghost;
 
-  getSpeed(score) {
-    return Math.min(
-      CONFIG.BASE_PIPE_SPEED + CONFIG.SPEED_INCREMENT * Math.floor(score / CONFIG.SCORE_INTERVAL),
-      CONFIG.MAX_PIPE_SPEED
+  // 1. Apply gravity to velocity
+  ghost.vy += CONFIG.GRAVITY * dt;
+
+  // 2. Clamp velocity to allowed range
+  ghost.vy = Math.max(CONFIG.MAX_RISE_SPEED, Math.min(ghost.vy, CONFIG.MAX_FALL_SPEED));
+
+  // 3. Update position
+  ghost.y += ghost.vy * dt;
+
+  // 4. Clamp top boundary
+  if (ghost.y < 0) {
+    ghost.y = 0;
+    ghost.vy = 0;
+  }
+
+  // 5. Update sprite animation (dt is in seconds, animation needs ms)
+  updateGhostAnimation(dt * 1000);
+}
+
+function renderGhost(ctx) {
+  var ghost = gameState.ghost;
+  var halfW = CONFIG.GHOST_WIDTH / 2;
+  var halfH = CONFIG.GHOST_HEIGHT / 2;
+
+  // Calculate rotation based on velocity (visual only)
+  var rotation = 0;
+  if (ghost.vy < 0) {
+    rotation = -10; // rising: nose up
+  } else if (ghost.vy > 0) {
+    rotation = Math.min(ghost.vy / CONFIG.MAX_FALL_SPEED * 10, 10); // falling: proportional clockwise
+  }
+
+  ctx.save();
+  ctx.translate(ghost.x + halfW, ghost.y + halfH); // move to sprite center
+  ctx.rotate(rotation * Math.PI / 180);             // apply rotation
+
+  if (spriteSheet.complete && spriteSheet.naturalWidth > 0) {
+    // Draw the full ghosty.png image scaled to ghost size
+    ctx.drawImage(
+      spriteSheet,
+      -halfW, -halfH,
+      CONFIG.GHOST_WIDTH, CONFIG.GHOST_HEIGHT
     );
-  },
+  } else {
+    // Fallback: white filled circle
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, 0, CONFIG.GHOST_HITBOX_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  generateGapCenter() {
-    const minY = CONFIG.MIN_PIPE_HEIGHT + CONFIG.GAP_HEIGHT / 2;
-    const maxY = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT - CONFIG.MIN_PIPE_HEIGHT - CONFIG.GAP_HEIGHT / 2;
-    return minY + Math.random() * (maxY - minY);
-  },
+  ctx.restore();
+}
 
-  shouldSpawn() {
-    if (this.pipes.length === 0) return true;
-    const lastPipe = this.pipes[this.pipes.length - 1];
-    return lastPipe.x <= CONFIG.LOGICAL_WIDTH - CONFIG.SPAWN_SPACING;
-  },
+// ═══════════════════════════════════════
+// PIPES
+// ═══════════════════════════════════════
 
-  spawn() {
-    this.pipes.push({
-      x: CONFIG.LOGICAL_WIDTH + CONFIG.PIPE_WIDTH,
-      gapCenterY: this.generateGapCenter(),
-      width: CONFIG.PIPE_WIDTH,
-      scored: false,
-    });
-  },
+function getPipeSpeed(score) {
+  return Math.min(
+    CONFIG.BASE_PIPE_SPEED + CONFIG.SPEED_INCREMENT * Math.floor(score / CONFIG.SCORE_INTERVAL),
+    CONFIG.MAX_PIPE_SPEED
+  );
+}
 
-  getTopRect(pipe) {
-    return {
-      x: pipe.x,
-      y: 0,
-      width: pipe.width,
-      height: pipe.gapCenterY - CONFIG.GAP_HEIGHT / 2,
-    };
-  },
+function spawnPipe() {
+  var minY = CONFIG.MIN_PIPE_HEIGHT + CONFIG.GAP_HEIGHT / 2;
+  var maxY = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT - CONFIG.MIN_PIPE_HEIGHT - CONFIG.GAP_HEIGHT / 2;
+  var gapCenterY = minY + Math.random() * (maxY - minY);
 
-  getBottomRect(pipe) {
-    const gapBottom = pipe.gapCenterY + CONFIG.GAP_HEIGHT / 2;
-    return {
-      x: pipe.x,
-      y: gapBottom,
-      width: pipe.width,
-      height: (CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT) - gapBottom,
-    };
-  },
+  gameState.pipes.push({
+    x: CONFIG.LOGICAL_WIDTH,
+    gapCenterY: gapCenterY,
+    width: CONFIG.PIPE_WIDTH,
+    scored: false
+  });
+}
 
-  update(dt, score) {
-    const speed = this.getSpeed(score);
+function updatePipes(dt) {
+  var currentSpeed = getPipeSpeed(gameState.score);
 
-    // Move pipes
-    for (let i = 0; i < this.pipes.length; i++) {
-      this.pipes[i].x -= speed * dt;
+  // Move all pipes leftward
+  for (var i = 0; i < gameState.pipes.length; i++) {
+    gameState.pipes[i].x -= currentSpeed * dt;
+  }
+
+  // Remove off-screen pipes from the front
+  while (gameState.pipes.length > 0 && gameState.pipes[0].x + CONFIG.PIPE_WIDTH < 0) {
+    gameState.pipes.splice(0, 1);
+  }
+
+  // Spawn new pipe if needed
+  if (gameState.pipes.length === 0) {
+    spawnPipe();
+  } else {
+    var rightmost = gameState.pipes[gameState.pipes.length - 1];
+    if (rightmost.x <= CONFIG.LOGICAL_WIDTH - CONFIG.SPAWN_SPACING) {
+      spawnPipe();
     }
+  }
+}
 
-    // Remove off-screen pipes
-    while (this.pipes.length > 0 && this.pipes[0].x + CONFIG.PIPE_WIDTH < 0) {
-      this.pipes.shift();
+function renderPipes(ctx) {
+  var pipeLoaded = pipeImage.complete && pipeImage.naturalWidth > 0;
+
+  for (var i = 0; i < gameState.pipes.length; i++) {
+    var pipe = gameState.pipes[i];
+    var gapTop = pipe.gapCenterY - CONFIG.GAP_HEIGHT / 2;
+    var gapBottom = pipe.gapCenterY + CONFIG.GAP_HEIGHT / 2;
+    var groundTop = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT;
+
+    if (pipeLoaded) {
+      // Top pipe: draw normally (opening/cap at bottom, facing down toward gap)
+      var topH = gapTop;
+      if (topH > 0) {
+        ctx.drawImage(pipeImage, pipe.x, 0, CONFIG.PIPE_WIDTH, topH);
+      }
+
+      // Bottom pipe: flip vertically (opening/cap at top, facing up toward gap)
+      var bottomH = groundTop - gapBottom;
+      if (bottomH > 0) {
+        ctx.save();
+        ctx.translate(pipe.x, gapBottom);
+        ctx.scale(1, -1);
+        ctx.drawImage(pipeImage, 0, -bottomH, CONFIG.PIPE_WIDTH, bottomH);
+        ctx.restore();
+      }
+    } else {
+      ctx.fillStyle = CONFIG.COLOR_PIPE;
+      ctx.fillRect(pipe.x, 0, CONFIG.PIPE_WIDTH, gapTop);
+      ctx.fillRect(pipe.x, gapBottom, CONFIG.PIPE_WIDTH, groundTop - gapBottom);
     }
-
-    // Spawn new pipes
-    if (this.shouldSpawn()) {
-      this.spawn();
-    }
-  },
-
-  reset() {
-    this.pipes = [];
-  },
-};
+  }
+}
 
 // ═══════════════════════════════════════
 // COLLISION
 // ═══════════════════════════════════════
 
-const collision = {
-  circleRectOverlap(circle, rect) {
-    const closestX = Math.max(rect.x, Math.min(circle.cx, rect.x + rect.width));
-    const closestY = Math.max(rect.y, Math.min(circle.cy, rect.y + rect.height));
-    const dx = circle.cx - closestX;
-    const dy = circle.cy - closestY;
-    return (dx * dx + dy * dy) <= (circle.radius * circle.radius);
-  },
+function circleRectOverlap(circle, rect) {
+  var closestX = Math.max(rect.x, Math.min(circle.cx, rect.x + rect.width));
+  var closestY = Math.max(rect.y, Math.min(circle.cy, rect.y + rect.height));
+  var dx = circle.cx - closestX;
+  var dy = circle.cy - closestY;
+  return (dx * dx + dy * dy) <= (circle.radius * circle.radius);
+}
 
-  checkPipeCollision(ghostHitbox, pipe) {
-    const topRect = pipeManager.getTopRect(pipe);
-    const bottomRect = pipeManager.getBottomRect(pipe);
-    return this.circleRectOverlap(ghostHitbox, topRect) ||
-           this.circleRectOverlap(ghostHitbox, bottomRect);
-  },
+function checkPipeCollision(circle, pipe) {
+  var gapTop = pipe.gapCenterY - CONFIG.GAP_HEIGHT / 2;
+  var gapBottom = pipe.gapCenterY + CONFIG.GAP_HEIGHT / 2;
+  var groundY = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT;
 
-  checkGroundCollision(ghostHitbox) {
-    const groundY = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT;
-    return (ghostHitbox.cy + ghostHitbox.radius) >= groundY;
-  },
+  // Top pipe rect: from y=0 to gap top edge
+  var topRect = { x: pipe.x, y: 0, width: CONFIG.PIPE_WIDTH, height: gapTop };
+  if (circleRectOverlap(circle, topRect)) return true;
 
-  check() {
-    const hitbox = ghost.getHitbox();
+  // Bottom pipe rect: from gap bottom edge to ground top
+  var bottomRect = { x: pipe.x, y: gapBottom, width: CONFIG.PIPE_WIDTH, height: groundY - gapBottom };
+  if (circleRectOverlap(circle, bottomRect)) return true;
 
-    // Ground collision (fast path)
-    if (this.checkGroundCollision(hitbox)) return true;
+  return false;
+}
 
-    // Pipe collisions (only nearby pipes)
-    for (let i = 0; i < pipeManager.pipes.length; i++) {
-      const pipe = pipeManager.pipes[i];
-      if (pipe.x > hitbox.cx + 32) break; // pipes ahead, skip rest
-      if (pipe.x + pipe.width < hitbox.cx - hitbox.radius) continue; // behind
-      if (this.checkPipeCollision(hitbox, pipe)) return true;
+function checkGroundCollision(circle) {
+  var groundY = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT;
+  return (circle.cy + circle.radius) >= groundY;
+}
+
+function checkCollisions() {
+  var ghost = gameState.ghost;
+  var circle = getGhostHitbox();
+
+  // Fast path: check ground collision first
+  if (checkGroundCollision(circle)) {
+    triggerGameOver();
+    return true;
+  }
+
+  // Only check pipes near the ghost for optimization
+  for (var i = 0; i < gameState.pipes.length; i++) {
+    var pipe = gameState.pipes[i];
+    // Broad phase: skip pipes that are clearly not near the ghost
+    if (pipe.x >= ghost.x + CONFIG.GHOST_WIDTH) continue;
+    if (pipe.x + CONFIG.PIPE_WIDTH <= ghost.x - CONFIG.GHOST_HITBOX_RADIUS) continue;
+
+    if (checkPipeCollision(circle, pipe)) {
+      triggerGameOver();
+      return true;
     }
+  }
 
-    return false;
-  },
-};
+  return false;
+}
 
-// ═══════════════════════════════════════
-// SCORE MANAGER
-// ═══════════════════════════════════════
+function triggerGameOver() {
+  gameState.state = 'gameover';
+  gameState.gameOverTime = performance.now();
+  setGhostAnimState('death');
 
-const scoreManager = {
-  popups: [],
+  // Trigger screen shake
+  gameState.shake.active = true;
+  gameState.shake.elapsed = 0;
 
-  loadHighScore() {
-    try {
-      return parseInt(localStorage.getItem('flappyKiro_highScore'), 10) || 0;
-    } catch (e) {
-      return 0;
-    }
-  },
+  // Save high score
+  saveHighScore(gameState.score);
 
-  saveHighScore(score) {
-    try {
-      if (score > this.loadHighScore()) {
-        localStorage.setItem('flappyKiro_highScore', String(score));
-      }
-    } catch (e) {
-      // silently fail
-    }
-  },
-
-  checkScoring() {
-    const ghostCenterX = ghost.x + 16;
-    for (let i = 0; i < pipeManager.pipes.length; i++) {
-      const pipe = pipeManager.pipes[i];
-      if (!pipe.scored && ghostCenterX > pipe.x + pipe.width) {
-        pipe.scored = true;
-        gameState.score++;
-        this.spawnPopup(ghost.x, ghost.y);
-        audioManager.play('score');
-      }
-    }
-  },
-
-  spawnPopup(x, y) {
-    this.popups.push({ x, y, elapsed: 0 });
-  },
-
-  updatePopups(dtMs) {
-    for (let i = this.popups.length - 1; i >= 0; i--) {
-      this.popups[i].elapsed += dtMs;
-      if (this.popups[i].elapsed >= CONFIG.POPUP_DURATION) {
-        this.popups.splice(i, 1);
-      }
-    }
-  },
-
-  getPopupOpacity(popup) {
-    return 1 - (popup.elapsed / CONFIG.POPUP_DURATION);
-  },
-
-  getPopupOffsetY(popup) {
-    return CONFIG.POPUP_RISE * (popup.elapsed / CONFIG.POPUP_DURATION);
-  },
-
-  reset() {
-    this.popups = [];
-  },
-};
-
-// ═══════════════════════════════════════
-// PARTICLES
-// ═══════════════════════════════════════
-
-const particleSystem = {
-  particles: [],
-  frameCounter: 0,
-
-  emit(ghostX, ghostY) {
-    this.particles.push({
-      x: ghostX,
-      y: ghostY + 16 + (Math.random() * 2 - 1) * CONFIG.PARTICLE_OFFSET_RANGE,
-      radius: CONFIG.PARTICLE_MIN_RADIUS + Math.random() * (CONFIG.PARTICLE_MAX_RADIUS - CONFIG.PARTICLE_MIN_RADIUS),
-      elapsed: 0,
-      active: true,
-    });
-  },
-
-  update(dtMs) {
-    this.frameCounter++;
-    if (gameState.current === 'running' && this.frameCounter % CONFIG.PARTICLE_EMIT_INTERVAL === 0) {
-      this.emit(ghost.x, ghost.y);
-    }
-
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      this.particles[i].elapsed += dtMs;
-      if (this.particles[i].elapsed >= CONFIG.PARTICLE_LIFESPAN) {
-        this.particles.splice(i, 1);
-      }
-    }
-  },
-
-  getOpacity(particle) {
-    return CONFIG.PARTICLE_INITIAL_OPACITY * (1 - particle.elapsed / CONFIG.PARTICLE_LIFESPAN);
-  },
-
-  reset() {
-    this.particles = [];
-    this.frameCounter = 0;
-  },
-};
-
-// ═══════════════════════════════════════
-// CLOUDS
-// ═══════════════════════════════════════
-
-const cloudManager = {
-  clouds: [],
-
-  initialize() {
-    const count = CONFIG.CLOUD_COUNT_MIN + Math.floor(Math.random() * (CONFIG.CLOUD_COUNT_MAX - CONFIG.CLOUD_COUNT_MIN + 1));
-    this.clouds = [];
-    for (let i = 0; i < count; i++) {
-      this.clouds.push(this.createCloud(Math.random() * CONFIG.LOGICAL_WIDTH));
-    }
-    // Sort by speed (slowest first for depth)
-    this.clouds.sort((a, b) => a.speed - b.speed);
-  },
-
-  createCloud(x) {
-    const speed = CONFIG.CLOUD_MIN_SPEED + Math.random() * (CONFIG.CLOUD_MAX_SPEED - CONFIG.CLOUD_MIN_SPEED);
-    const speedRatio = (speed - CONFIG.CLOUD_MIN_SPEED) / (CONFIG.CLOUD_MAX_SPEED - CONFIG.CLOUD_MIN_SPEED);
-    const opacity = CONFIG.CLOUD_MIN_OPACITY + speedRatio * (CONFIG.CLOUD_MAX_OPACITY - CONFIG.CLOUD_MIN_OPACITY);
-    const maxY = CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT - 60;
-    return {
-      x,
-      y: 30 + Math.random() * (maxY - 30),
-      width: 50 + Math.random() * 40,
-      height: 20 + Math.random() * 15,
-      speed,
-      opacity,
-    };
-  },
-
-  update(dt) {
-    for (let i = 0; i < this.clouds.length; i++) {
-      this.clouds[i].x -= this.clouds[i].speed * dt;
-      if (this.clouds[i].x + this.clouds[i].width < 0) {
-        this.clouds[i] = this.createCloud(CONFIG.LOGICAL_WIDTH + this.clouds[i].width);
-      }
-    }
-  },
-
-  reset() {
-    this.initialize();
-  },
-};
+  // Play game over sound and stop music
+  playSound('gameOver');
+  stopMusic();
+}
 
 // ═══════════════════════════════════════
 // SCREEN SHAKE
 // ═══════════════════════════════════════
 
-const screenShake = {
-  active: false,
-  elapsed: 0,
-  offsetX: 0,
-  offsetY: 0,
+function updateShake(dt) {
+  var shake = gameState.shake;
+  if (!shake.active) return;
 
-  trigger() {
-    this.active = true;
-    this.elapsed = 0;
-  },
+  shake.elapsed += dt * 1000;
 
-  update(dtMs) {
-    if (!this.active) return;
-    this.elapsed += dtMs;
-    if (this.elapsed >= CONFIG.SHAKE_DURATION) {
-      this.active = false;
-      this.offsetX = 0;
-      this.offsetY = 0;
+  if (shake.elapsed >= CONFIG.SHAKE_DURATION) {
+    shake.active = false;
+    shake.offsetX = 0;
+    shake.offsetY = 0;
+    return;
+  }
+
+  var intensity = CONFIG.SHAKE_INTENSITY * (1 - shake.elapsed / CONFIG.SHAKE_DURATION);
+  shake.offsetX = (Math.random() * 2 - 1) * intensity;
+  shake.offsetY = (Math.random() * 2 - 1) * intensity;
+}
+
+// ═══════════════════════════════════════
+// PARTICLES
+// ═══════════════════════════════════════
+
+const PARTICLE_POOL_SIZE = 50;
+const particlePool = [];
+for (var i = 0; i < PARTICLE_POOL_SIZE; i++) {
+  particlePool.push({ x: 0, y: 0, radius: 2, elapsed: 0, active: false });
+}
+
+function emitParticle() {
+  // Find an inactive particle in the pool
+  for (var i = 0; i < PARTICLE_POOL_SIZE; i++) {
+    if (!particlePool[i].active) {
+      var p = particlePool[i];
+      p.x = gameState.ghost.x;
+      p.y = gameState.ghost.y + CONFIG.GHOST_HEIGHT / 2 + (Math.random() * 2 - 1) * CONFIG.PARTICLE_OFFSET_RANGE;
+      p.radius = CONFIG.PARTICLE_MIN_RADIUS + Math.floor(Math.random() * (CONFIG.PARTICLE_MAX_RADIUS - CONFIG.PARTICLE_MIN_RADIUS + 1));
+      p.elapsed = 0;
+      p.active = true;
       return;
     }
-    const intensity = CONFIG.SHAKE_INTENSITY * (1 - this.elapsed / CONFIG.SHAKE_DURATION);
-    this.offsetX = (Math.random() * 2 - 1) * intensity;
-    this.offsetY = (Math.random() * 2 - 1) * intensity;
-  },
+  }
+}
 
-  reset() {
-    this.active = false;
-    this.elapsed = 0;
-    this.offsetX = 0;
-    this.offsetY = 0;
-  },
-};
+function updateParticles(dt) {
+  gameState.frameCount++;
+  if (gameState.frameCount % CONFIG.PARTICLE_EMIT_INTERVAL === 0) {
+    emitParticle();
+  }
+  var dtMs = dt * 1000;
+  for (var i = 0; i < PARTICLE_POOL_SIZE; i++) {
+    if (particlePool[i].active) {
+      particlePool[i].elapsed += dtMs;
+      if (particlePool[i].elapsed >= CONFIG.PARTICLE_LIFESPAN) {
+        particlePool[i].active = false;
+      }
+    }
+  }
+}
+
+function renderParticles(ctx) {
+  // Particle trail disabled — only ghosty visible
+}
+
+// ═══════════════════════════════════════
+// SCORING
+// ═══════════════════════════════════════
+
+function loadHighScore() {
+  try {
+    return parseInt(localStorage.getItem('flappyKiro_highScore'), 10) || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function saveHighScore(score) {
+  try {
+    if (score > loadHighScore()) {
+      localStorage.setItem('flappyKiro_highScore', String(score));
+    }
+  } catch (e) {
+    // silently fail
+  }
+}
+
+function updateScore() {
+  var ghost = gameState.ghost;
+  for (var i = 0; i < gameState.pipes.length; i++) {
+    var pipe = gameState.pipes[i];
+    if (ghost.x > pipe.x + CONFIG.PIPE_WIDTH && !pipe.scored) {
+      pipe.scored = true;
+      gameState.score++;
+      playSound('score');
+      gameState.scorePopups.push({ x: ghost.x, y: ghost.y, elapsed: 0 });
+      if (gameState.score > gameState.highScore) {
+        gameState.highScore = gameState.score;
+        saveHighScore(gameState.score);
+      }
+    }
+  }
+}
+
+function updateScorePopups(dt) {
+  for (var i = gameState.scorePopups.length - 1; i >= 0; i--) {
+    gameState.scorePopups[i].elapsed += dt * 1000;
+    if (gameState.scorePopups[i].elapsed >= CONFIG.POPUP_DURATION) {
+      gameState.scorePopups.splice(i, 1);
+    }
+  }
+}
+
+function renderScore(ctx) {
+  ctx.font = '16px monospace';
+  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+  ctx.shadowBlur = 2;
+  ctx.shadowOffsetX = 1;
+  ctx.shadowOffsetY = 1;
+
+  ctx.textAlign = 'left';
+  ctx.fillText('Score: ' + gameState.score, 10, CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT + 20);
+
+  ctx.textAlign = 'right';
+  ctx.fillText('High: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH - 10, CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT + 20);
+
+  // Reset shadow and alignment
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.textAlign = 'left';
+}
+
+function renderScorePopups(ctx) {
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+  ctx.textAlign = 'left';
+  for (var i = 0; i < gameState.scorePopups.length; i++) {
+    var popup = gameState.scorePopups[i];
+    var t = popup.elapsed;
+    var opacity = 1 - t / CONFIG.POPUP_DURATION;
+    var offsetY = CONFIG.POPUP_RISE * (t / CONFIG.POPUP_DURATION);
+    ctx.globalAlpha = opacity;
+    ctx.fillText('+1', popup.x, popup.y - offsetY);
+  }
+  ctx.globalAlpha = 1.0;
+}
 
 // ═══════════════════════════════════════
 // AUDIO
 // ═══════════════════════════════════════
 
-const audioManager = {
-  sounds: {},
-  music: null,
-  isUserInteracted: false,
+var userInteracted = false;
 
-  preload() {
-    this.sounds.flap = this.loadSound('assets/jump.wav', 0.5);
-    this.sounds.score = this.loadSound('assets/score.wav', 0.6);
-    this.sounds.collision = this.loadSound('assets/game_over.wav', 0.7);
-
-    this.music = new Audio('assets/background_music.mp3');
-    this.music.loop = true;
-    this.music.volume = CONFIG.MUSIC_VOLUME;
-  },
-
-  loadSound(src, volume) {
-    const audio = new Audio(src);
-    audio.volume = volume;
-    return audio;
-  },
-
-  play(name) {
-    try {
-      if (!this.sounds[name]) return;
-      const clone = this.sounds[name].cloneNode();
-      clone.volume = this.sounds[name].volume;
+function playSound(name) {
+  try {
+    if (name === 'gameOver') {
+      // Exclusive: stop other sounds, play directly
+      sounds.jump.pause();
+      sounds.jump.currentTime = 0;
+      sounds.score.pause();
+      sounds.score.currentTime = 0;
+      sounds.gameOver.currentTime = 0;
+      sounds.gameOver.play();
+    } else if (name === 'jump' || name === 'score') {
+      // Overlapping: clone the node
+      var clone = sounds[name].cloneNode();
+      clone.volume = sounds[name].volume;
       clone.play();
-    } catch (e) {
-      console.warn('Audio play failed:', name, e);
     }
-  },
+  } catch (e) {
+    console.warn('Audio playback failed:', name, e);
+  }
+}
 
-  playCollision() {
-    try {
-      if (!this.sounds.collision) return;
-      this.sounds.collision.currentTime = 0;
-      this.sounds.collision.play();
-    } catch (e) {
-      console.warn('Collision audio failed:', e);
-    }
-  },
+function startMusic() {
+  if (!userInteracted) return;
+  try {
+    sounds.music.currentTime = 0;
+    sounds.music.play();
+  } catch (e) {
+    console.warn('Music playback failed:', e);
+  }
+}
 
-  startMusic() {
-    try {
-      if (this.music) {
-        this.music.currentTime = 0;
-        this.music.play();
-      }
-    } catch (e) {
-      console.warn('Music start failed:', e);
-    }
-  },
-
-  stopMusic() {
-    try {
-      if (this.music) this.music.pause();
-    } catch (e) {
-      console.warn('Music stop failed:', e);
-    }
-  },
-
-  handleInteraction() {
-    if (this.isUserInteracted) return;
-    this.isUserInteracted = true;
-  },
-};
+function stopMusic() {
+  try {
+    sounds.music.pause();
+  } catch (e) {
+    console.warn('Music pause failed:', e);
+  }
+}
 
 // ═══════════════════════════════════════
 // RENDERING
 // ═══════════════════════════════════════
 
-const renderer = {
-  canvas: null,
-  ctx: null,
-  scale: 1,
-  offsetX: 0,
-  offsetY: 0,
+function renderBackground(ctx) {
+  ctx.fillStyle = CONFIG.COLOR_SKY;
+  ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
+}
 
-  init() {
-    this.canvas = document.getElementById('gameCanvas');
-    this.ctx = this.canvas.getContext('2d');
-    this.handleResize();
-    window.addEventListener('resize', () => this.handleResize());
-  },
+function initClouds() {
+  var count = CONFIG.CLOUD_COUNT_MIN + Math.floor(Math.random() * (CONFIG.CLOUD_COUNT_MAX - CONFIG.CLOUD_COUNT_MIN + 1));
+  var clouds = [];
+  for (var i = 0; i < count; i++) {
+    clouds.push({
+      x: Math.random() * CONFIG.LOGICAL_WIDTH,
+      y: 20 + Math.random() * (CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT - 40 - 20),
+      width: 40 + Math.random() * 60,
+      height: 20 + Math.random() * 20,
+      speed: CONFIG.CLOUD_MIN_SPEED + Math.random() * (CONFIG.CLOUD_MAX_SPEED - CONFIG.CLOUD_MIN_SPEED),
+      opacity: 0  // placeholder, will be assigned after sorting
+    });
+  }
+  // Sort by speed ascending for speed-opacity correlation
+  clouds.sort(function(a, b) { return a.speed - b.speed; });
+  // Assign opacity linearly mapped from speed (slower=lower opacity, faster=higher opacity)
+  for (var i = 0; i < clouds.length; i++) {
+    clouds[i].opacity = CONFIG.CLOUD_MIN_OPACITY +
+      (clouds[i].speed - CONFIG.CLOUD_MIN_SPEED) / (CONFIG.CLOUD_MAX_SPEED - CONFIG.CLOUD_MIN_SPEED) *
+      (CONFIG.CLOUD_MAX_OPACITY - CONFIG.CLOUD_MIN_OPACITY);
+  }
+  gameState.clouds = clouds;
+}
 
-  handleResize() {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const targetRatio = CONFIG.LOGICAL_WIDTH / CONFIG.LOGICAL_HEIGHT;
-    const viewportRatio = vw / vh;
-
-    let canvasW, canvasH;
-    if (viewportRatio > targetRatio) {
-      canvasH = Math.max(vh, CONFIG.MIN_CANVAS_HEIGHT);
-      canvasW = canvasH * targetRatio;
-    } else {
-      canvasW = Math.max(vw, CONFIG.MIN_CANVAS_WIDTH);
-      canvasH = canvasW / targetRatio;
+function updateClouds(dt) {
+  for (var i = 0; i < gameState.clouds.length; i++) {
+    var cloud = gameState.clouds[i];
+    cloud.x -= cloud.speed * dt;
+    // Wrap around when fully off-screen left
+    if (cloud.x + cloud.width < 0) {
+      cloud.x = CONFIG.LOGICAL_WIDTH + Math.random() * 50;
+      cloud.y = 20 + Math.random() * (CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT - 40 - 20);
     }
+  }
+}
 
-    this.canvas.width = canvasW;
-    this.canvas.height = canvasH;
-    this.scale = canvasH / CONFIG.LOGICAL_HEIGHT;
-    this.offsetX = (vw - canvasW) / 2;
-    this.offsetY = (vh - canvasH) / 2;
-    this.canvas.style.marginLeft = this.offsetX + 'px';
-    this.canvas.style.marginTop = this.offsetY + 'px';
-  },
-
-  render() {
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-    ctx.save();
-    ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
-
-    // Apply screen shake
-    if (screenShake.active) {
-      ctx.translate(screenShake.offsetX, screenShake.offsetY);
-    }
-
-    this.renderBackground(ctx);
-    this.renderClouds(ctx);
-    this.renderPipes(ctx);
-    this.renderGround(ctx);
-    this.renderParticles(ctx);
-    this.renderGhost(ctx);
-    this.renderPopups(ctx);
-    this.renderHUD(ctx);
-
-    if (gameState.current === 'gameover') {
-      this.renderGameOver(ctx);
-    } else if (gameState.current === 'idle') {
-      this.renderMainMenu(ctx);
-    }
-
-    ctx.restore();
-  },
-
-  renderBackground(ctx) {
-    ctx.fillStyle = CONFIG.COLOR_SKY;
-    ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
-  },
-
-  renderClouds(ctx) {
-    for (let i = 0; i < cloudManager.clouds.length; i++) {
-      const cloud = cloudManager.clouds[i];
-      ctx.globalAlpha = cloud.opacity;
-      ctx.fillStyle = CONFIG.COLOR_CLOUD;
-      ctx.beginPath();
-      ctx.roundRect(cloud.x, cloud.y, cloud.width, cloud.height, 10);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1.0;
-  },
-
-  renderPipes(ctx) {
-    ctx.fillStyle = CONFIG.COLOR_PIPE;
-    for (let i = 0; i < pipeManager.pipes.length; i++) {
-      const pipe = pipeManager.pipes[i];
-      const topRect = pipeManager.getTopRect(pipe);
-      const bottomRect = pipeManager.getBottomRect(pipe);
-      ctx.fillRect(topRect.x, topRect.y, topRect.width, topRect.height);
-      ctx.fillRect(bottomRect.x, bottomRect.y, bottomRect.width, bottomRect.height);
-    }
-  },
-
-  renderGround(ctx) {
-    ctx.fillStyle = CONFIG.COLOR_GROUND;
-    ctx.fillRect(0, CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT, CONFIG.LOGICAL_WIDTH, CONFIG.GROUND_HEIGHT);
-  },
-
-  renderParticles(ctx) {
-    ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < particleSystem.particles.length; i++) {
-      const p = particleSystem.particles[i];
-      ctx.globalAlpha = particleSystem.getOpacity(p);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1.0;
-  },
-
-  renderGhost(ctx) {
-    const rotation = ghost.getRotation();
-    ctx.save();
-    ctx.translate(ghost.x + 16, ghost.y + 16);
-    ctx.rotate(rotation * Math.PI / 180);
-
-    if (ghost.sprite.isLoaded) {
-      const frameX = ghost.sprite.currentFrame * CONFIG.SPRITE_FRAME_WIDTH;
-      ctx.drawImage(ghost.sprite.image, frameX, 0, 32, 32, -16, -16, 32, 32);
-    } else {
-      // Fallback: white circle
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(0, 0, CONFIG.GHOST_HITBOX_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  },
-
-  renderPopups(ctx) {
-    ctx.font = 'bold 14px monospace';
-    for (let i = 0; i < scoreManager.popups.length; i++) {
-      const popup = scoreManager.popups[i];
-      const alpha = scoreManager.getPopupOpacity(popup);
-      const offsetY = scoreManager.getPopupOffsetY(popup);
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-      ctx.shadowColor = 'rgba(0,0,0,0.5)';
-      ctx.shadowBlur = 2;
-      ctx.fillText('+1', popup.x + 20, popup.y - offsetY);
-    }
-    ctx.globalAlpha = 1.0;
-    ctx.shadowBlur = 0;
-  },
-
-  renderHUD(ctx) {
-    if (gameState.current !== 'running') return;
-    ctx.font = '16px monospace';
-    ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-    ctx.shadowColor = 'rgba(0,0,0,0.7)';
-    ctx.shadowBlur = 2;
-    ctx.fillText('Score: ' + gameState.score, 10, CONFIG.LOGICAL_HEIGHT - 20);
-    ctx.fillText('High: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH - 100, CONFIG.LOGICAL_HEIGHT - 20);
-    ctx.shadowBlur = 0;
-  },
-
-  renderMainMenu(ctx) {
-    // Title
-    ctx.font = 'bold 28px monospace';
-    ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-    ctx.textAlign = 'center';
-    ctx.fillText('FLAPPY KIRO', CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.3);
-
-    // High score
-    ctx.font = '16px monospace';
-    ctx.fillStyle = CONFIG.COLOR_UI_ACCENT;
-    ctx.fillText('High: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.4);
-
-    // Pulsing instruction
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 500 * Math.PI);
-    ctx.globalAlpha = pulse;
-    ctx.font = '14px monospace';
-    ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-    ctx.fillText('Tap or click to start', CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.65);
-    ctx.globalAlpha = 1.0;
-    ctx.textAlign = 'left';
-  },
-
-  renderGameOver(ctx) {
-    // Overlay
-    ctx.fillStyle = CONFIG.COLOR_UI_BG;
-    ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
-
-    // Panel
-    const panelW = 280;
-    const panelH = 200;
-    const panelX = (CONFIG.LOGICAL_WIDTH - panelW) / 2;
-    const panelY = (CONFIG.LOGICAL_HEIGHT - panelH) / 2;
-
-    ctx.fillStyle = 'rgba(30, 30, 60, 0.95)';
+function renderClouds(ctx) {
+  // Sort by speed ascending (slowest first = farthest back)
+  var sorted = gameState.clouds.slice().sort(function(a, b) { return a.speed - b.speed; });
+  for (var i = 0; i < sorted.length; i++) {
+    var cloud = sorted[i];
+    ctx.globalAlpha = cloud.opacity;
+    ctx.fillStyle = CONFIG.COLOR_CLOUD;
+    // Draw rounded rectangle
+    var x = cloud.x;
+    var y = cloud.y;
+    var w = cloud.width;
+    var h = cloud.height;
+    var radius = Math.min(h / 2, 10);
     ctx.beginPath();
-    ctx.roundRect(panelX, panelY, panelW, panelH, 12);
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
     ctx.fill();
+  }
+  ctx.globalAlpha = 1.0;
+}
 
-    ctx.textAlign = 'center';
-    const cx = CONFIG.LOGICAL_WIDTH / 2;
+function renderGround(ctx) {
+  ctx.fillStyle = CONFIG.COLOR_GROUND;
+  ctx.fillRect(0, CONFIG.LOGICAL_HEIGHT - CONFIG.GROUND_HEIGHT, CONFIG.LOGICAL_WIDTH, CONFIG.GROUND_HEIGHT);
+}
 
-    // Game Over text
-    ctx.font = 'bold 24px monospace';
+// ═══════════════════════════════════════
+// UI
+// ═══════════════════════════════════════
+
+function drawRoundedRect(ctx, x, y, w, h, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+function renderMainMenu(ctx) {
+  // Title "FLAPPY KIRO" centered at ~30% from top
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+  ctx.textAlign = 'center';
+  ctx.fillText('FLAPPY KIRO', CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.3);
+
+  // High score display centered at ~65% from top
+  ctx.font = '16px sans-serif';
+  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+  ctx.textAlign = 'center';
+  ctx.fillText('High Score: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.65);
+
+  // Pulsing instruction text "Tap or click to start" at ~85% from top
+  var pulseOpacity = 0.5 + 0.5 * Math.sin(performance.now() / 500 * Math.PI);
+  ctx.globalAlpha = pulseOpacity;
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+  ctx.textAlign = 'center';
+  ctx.fillText('Tap or click to start', CONFIG.LOGICAL_WIDTH / 2, CONFIG.LOGICAL_HEIGHT * 0.85);
+  ctx.globalAlpha = 1.0;
+
+  // Reset text alignment
+  ctx.textAlign = 'left';
+}
+
+function renderGameOver(ctx) {
+  // Full-screen semi-transparent dark overlay
+  ctx.fillStyle = CONFIG.COLOR_UI_BG;
+  ctx.fillRect(0, 0, CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
+
+  // Centered panel (~280×200px)
+  var panelW = 280;
+  var panelH = 200;
+  var panelX = (CONFIG.LOGICAL_WIDTH - panelW) / 2;
+  var panelY = (CONFIG.LOGICAL_HEIGHT - panelH) / 2;
+
+  // Draw rounded panel background
+  ctx.fillStyle = 'rgba(30, 30, 30, 0.9)';
+  drawRoundedRect(ctx, panelX, panelY, panelW, panelH, 10);
+  ctx.fill();
+
+  // "GAME OVER" title at top of panel
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+  ctx.textAlign = 'center';
+  ctx.fillText('GAME OVER', CONFIG.LOGICAL_WIDTH / 2, panelY + 40);
+
+  // "Score: X" below title
+  ctx.font = '18px sans-serif';
+  ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
+  ctx.fillText('Score: ' + gameState.score, CONFIG.LOGICAL_WIDTH / 2, panelY + 80);
+
+  // "Best: X" below score
+  ctx.fillText('Best: ' + gameState.highScore, CONFIG.LOGICAL_WIDTH / 2, panelY + 110);
+
+  // Conditional "New High Score!" in gold if current score equals high score and score > 0
+  if (gameState.score > 0 && gameState.score >= gameState.highScore) {
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = CONFIG.COLOR_UI_ACCENT;
+    ctx.fillText('New High Score!', CONFIG.LOGICAL_WIDTH / 2, panelY + 140);
+  }
+
+  // Pulsing restart prompt — only visible after 500ms (RESTART_DELAY)
+  if (gameState.gameOverTime !== null && (performance.now() - gameState.gameOverTime) >= CONFIG.RESTART_DELAY) {
+    var pulseOpacity = 0.5 + 0.5 * Math.sin(performance.now() / 500 * Math.PI);
+    ctx.globalAlpha = pulseOpacity;
+    ctx.font = '14px sans-serif';
     ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-    ctx.fillText('GAME OVER', cx, panelY + 45);
+    ctx.fillText('Tap or click to restart', CONFIG.LOGICAL_WIDTH / 2, panelY + 175);
+    ctx.globalAlpha = 1.0;
+  }
 
-    // Final score
-    ctx.font = '18px monospace';
-    ctx.fillText('Score: ' + gameState.score, cx, panelY + 85);
-
-    // High score
-    const isNewHigh = gameState.score > 0 && gameState.score >= gameState.highScore;
-    ctx.fillStyle = isNewHigh ? CONFIG.COLOR_UI_ACCENT : CONFIG.COLOR_UI_TEXT;
-    ctx.fillText('Best: ' + gameState.highScore, cx, panelY + 115);
-
-    if (isNewHigh) {
-      ctx.font = 'bold 14px monospace';
-      ctx.fillStyle = CONFIG.COLOR_UI_ACCENT;
-      ctx.fillText('New High Score!', cx, panelY + 140);
-    }
-
-    // Restart prompt (after delay)
-    if (gameState.canRestart()) {
-      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 500 * Math.PI);
-      ctx.globalAlpha = pulse;
-      ctx.font = '14px monospace';
-      ctx.fillStyle = CONFIG.COLOR_UI_TEXT;
-      ctx.fillText('Tap or click to restart', cx, panelY + 175);
-      ctx.globalAlpha = 1.0;
-    }
-
-    ctx.textAlign = 'left';
-  },
-};
+  // Reset text alignment
+  ctx.textAlign = 'left';
+}
 
 // ═══════════════════════════════════════
 // INPUT
 // ═══════════════════════════════════════
 
-function handleInput(e) {
-  if (e) e.preventDefault();
-  audioManager.handleInteraction();
+function flap() {
+  gameState.ghost.vy = CONFIG.FLAP_VELOCITY;
+  setGhostAnimState('flap');
+  playSound('jump');
+}
 
-  if (gameState.current === 'idle') {
-    startGame();
-  } else if (gameState.current === 'running') {
-    ghost.flap();
-    audioManager.play('flap');
-  } else if (gameState.current === 'gameover' && gameState.canRestart()) {
-    restartGame();
+function canRestart() {
+  return gameState.gameOverTime !== null &&
+         (performance.now() - gameState.gameOverTime) >= CONFIG.RESTART_DELAY;
+}
+
+function restart() {
+  gameState.score = 0;
+  gameState.pipes.length = 0;
+  gameState.particles.length = 0;
+  gameState.scorePopups.length = 0;
+  gameState.ghost.x = CONFIG.LOGICAL_WIDTH * CONFIG.GHOST_X_RATIO;
+  gameState.ghost.y = CONFIG.LOGICAL_HEIGHT / 2 - CONFIG.GHOST_HEIGHT / 2;
+  gameState.ghost.vy = 0;
+  setGhostAnimState('idle');
+  gameState.shake.active = false;
+  gameState.shake.elapsed = 0;
+  gameState.shake.offsetX = 0;
+  gameState.shake.offsetY = 0;
+  gameState.gameOverTime = null;
+  gameState.lastTimestamp = null;
+  gameState.frameCount = 0;
+  // Deactivate all particles in pool
+  for (var i = 0; i < PARTICLE_POOL_SIZE; i++) {
+    particlePool[i].active = false;
+  }
+  gameState.state = 'running';
+  flap();
+  startMusic();
+}
+
+function handleInput(e) {
+  if (e.type === 'touchstart') {
+    e.preventDefault();
+  }
+
+  userInteracted = true;
+
+  if (gameState.state === 'idle') {
+    gameState.state = 'running';
+    flap();
+    startMusic();
+  } else if (gameState.state === 'running') {
+    flap();
+  } else if (gameState.state === 'gameover') {
+    if (canRestart()) {
+      restart();
+    }
   }
 }
 
-function startGame() {
-  gameState.transition('running');
-  ghost.flap();
-  audioManager.play('flap');
-  audioManager.startMusic();
-}
+canvas.addEventListener('mousedown', handleInput);
+canvas.addEventListener('touchstart', handleInput);
+document.addEventListener('keydown', function(e) {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    handleInput(e);
+  }
+});
 
-function restartGame() {
-  gameState.score = 0;
-  gameState.gameOverTime = null;
-  pipeManager.reset();
-  particleSystem.reset();
-  scoreManager.reset();
-  screenShake.reset();
-  ghost.reset(CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
-  gameState.transition('running');
-  ghost.flap();
-  audioManager.play('flap');
-  audioManager.startMusic();
-}
-
-function triggerGameOver() {
-  gameState.transition('gameover');
-  gameState.gameOverTime = performance.now();
-  ghost.setAnimState('death');
-  screenShake.trigger();
-  audioManager.playCollision();
-  audioManager.stopMusic();
-  scoreManager.saveHighScore(gameState.score);
-  gameState.highScore = scoreManager.loadHighScore();
+function handleResize() {
+  // Recalculate canvas dimensions and scale factor without resetting game state.
+  // All game positions are in logical coordinates (400×600) and are unaffected
+  // by the physical canvas size change. Only the scale/offset used during
+  // rendering is recomputed.
+  resizeCanvas();
 }
 
 // ═══════════════════════════════════════
 // GAME LOOP
 // ═══════════════════════════════════════
 
+function render() {
+  // Clear canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Fill entire physical canvas with sky color (handles areas outside logical play area)
+  ctx.fillStyle = CONFIG.COLOR_SKY;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Set up scaling transform for logical coordinates, centered in viewport
+  ctx.save();
+  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+
+  // Apply screen shake offset
+  if (gameState.shake.active) {
+    ctx.translate(gameState.shake.offsetX, gameState.shake.offsetY);
+  }
+
+  // Render layers back-to-front
+  renderBackground(ctx);   // Layer 1: Sky
+  renderClouds(ctx);       // Layer 2: Clouds (slowest→fastest)
+  renderPipes(ctx);        // Layer 3: Pipes
+  renderGround(ctx);       // Layer 4: Ground
+  renderParticles(ctx);    // Layer 5: Particles
+  renderGhost(ctx);        // Layer 6: Ghost sprite
+  renderScorePopups(ctx);  // Layer 7: Score popups
+  renderScore(ctx);        // Layer 8: HUD
+
+  // State-specific overlays
+  if (gameState.state === 'gameover') {
+    renderGameOver(ctx);   // Layer 9: Game-over overlay
+  }
+  if (gameState.state === 'idle') {
+    renderMainMenu(ctx);   // Layer 10: Menu elements
+  }
+
+  ctx.restore();
+}
+
 function gameLoop(timestamp) {
+  // Calculate delta-time
   if (gameState.lastTimestamp === null) {
     gameState.lastTimestamp = timestamp;
   }
-
-  const rawDt = (timestamp - gameState.lastTimestamp) / 1000;
-  const dt = Math.min(Math.max(rawDt, 0), CONFIG.MAX_DELTA_TIME);
+  var rawDt = (timestamp - gameState.lastTimestamp) / 1000; // seconds
   gameState.lastTimestamp = timestamp;
 
-  update(dt);
-  renderer.render();
+  // Clamp delta-time to prevent large jumps
+  var dt = Math.max(0, Math.min(rawDt, CONFIG.MAX_DELTA_TIME));
+
+  // Update phase — only in running state
+  if (gameState.state === 'running') {
+    updateGhost(dt);
+    updatePipes(dt);
+    if (!checkCollisions()) {
+      // Only continue updates if no collision detected this frame
+      updateParticles(dt);
+      updateScore();
+      updateScorePopups(dt);
+    }
+    updateShake(dt);
+    updateClouds(dt);
+  } else if (gameState.state === 'idle') {
+    // In idle: update clouds for visual movement, update ghost animation for idle bob
+    updateClouds(dt);
+    updateGhostAnimation(dt * 1000); // just animation, no physics
+  } else if (gameState.state === 'gameover') {
+    // In gameover: only update shake (for decay) and popups (for fade)
+    updateShake(dt);
+    updateScorePopups(dt);
+  }
+
+  // Render phase — always render
+  render();
+
+  // Request next frame
   requestAnimationFrame(gameLoop);
 }
 
-function update(dt) {
-  const dtMs = dt * 1000;
-
-  // Clouds always drift
-  cloudManager.update(dt);
-
-  if (gameState.current === 'running') {
-    ghost.update(dt);
-    pipeManager.update(dt, gameState.score);
-    particleSystem.update(dtMs);
-    scoreManager.checkScoring();
-    scoreManager.updatePopups(dtMs);
-    gameState.frameCount++;
-
-    // Check collisions
-    if (collision.check()) {
-      triggerGameOver();
-    }
-  } else if (gameState.current === 'idle') {
-    ghost.updateAnimation(dt * 1000);
-  }
-
-  // Screen shake updates in gameover
-  if (gameState.current === 'gameover') {
-    screenShake.update(dtMs);
-    scoreManager.updatePopups(dtMs);
-  }
-}
-
-// ═══════════════════════════════════════
-// INITIALIZATION
-// ═══════════════════════════════════════
-
-function init() {
-  renderer.init();
-  audioManager.preload();
-  gameState.highScore = scoreManager.loadHighScore();
-  cloudManager.initialize();
-  ghost.reset(CONFIG.LOGICAL_WIDTH, CONFIG.LOGICAL_HEIGHT);
-
-  // Load sprite
-  const img = new Image();
-  img.onload = function () {
-    ghost.sprite.image = img;
-    ghost.sprite.isLoaded = true;
-    requestAnimationFrame(gameLoop);
-  };
-  img.onerror = function () {
-    console.warn('Sprite failed to load, using fallback rendering');
-    requestAnimationFrame(gameLoop);
-  };
-  img.src = 'assets/ghosty.png';
-
-  // Input listeners
-  const canvas = renderer.canvas;
-  canvas.addEventListener('mousedown', handleInput);
-  canvas.addEventListener('touchstart', handleInput);
-  document.addEventListener('keydown', function (e) {
-    if (e.code === 'Space') handleInput(e);
-  });
-}
-
-init();
+// Start the game loop once the sprite sheet loads (or on error for fallback)
+spriteSheet.onload = function() {
+  requestAnimationFrame(gameLoop);
+};
+spriteSheet.onerror = function() {
+  console.warn('Sprite sheet failed to load, using fallback rendering');
+  requestAnimationFrame(gameLoop);
+};
 </script>
 </body>
 </html>

@@ -6,9 +6,8 @@
     "jumpVelocityUnit": "px/s",
     "maxFallSpeed": 600,
     "maxFallSpeedUnit": "px/s",
-    "maxRiseSpeed": -400,
+    "maxRiseSpeed": -720,
     "maxRiseSpeedUnit": "px/s",
-    "referenceFrameMs": 16.67,
     "maxDeltaTime": 0.05,
     "maxDeltaTimeUnit": "seconds"
   },
@@ -17,8 +16,8 @@
     "speedUnit": "px/s",
     "maxSpeed": 300,
     "maxSpeedUnit": "px/s",
-    "speedIncrementPerInterval": 10,
-    "speedIncrementUnit": "px/s",
+    "speedIncrement": 6,
+    "speedIncrementUnit": "px/s per 5 points",
     "scoreInterval": 5,
     "width": 50,
     "widthUnit": "px",
@@ -34,7 +33,8 @@
     "logicalHeight": 600,
     "minCanvasWidth": 300,
     "minCanvasHeight": 400,
-    "groundHeight": 60
+    "groundHeight": 60,
+    "groundHeightUnit": "px"
   },
   "ghost": {
     "xPositionRatio": 0.25,
@@ -50,14 +50,17 @@
     "lifespanUnit": "ms",
     "minRadius": 2,
     "maxRadius": 4,
+    "radiusUnit": "px",
     "initialOpacity": 0.6,
-    "verticalOffsetRange": 3
+    "verticalOffsetRange": 3,
+    "verticalOffsetRangeUnit": "px"
   },
   "clouds": {
     "countMin": 3,
     "countMax": 6,
-    "minSpeed": 0.25,
-    "maxSpeed": 1.0,
+    "minSpeed": 15,
+    "maxSpeed": 60,
+    "speedUnit": "px/s",
     "minOpacity": 0.3,
     "maxOpacity": 0.7
   },
@@ -74,16 +77,29 @@
     "riseUnit": "px"
   },
   "audio": {
-    "musicVolume": 0.3
+    "musicVolume": 0.3,
+    "flapVolume": 0.5,
+    "scoreVolume": 0.6,
+    "collisionVolume": 0.7
   },
-  "gameOver": {
+  "timing": {
     "restartDelay": 500,
-    "restartDelayUnit": "ms"
+    "restartDelayUnit": "ms",
+    "shakeDuration": 300,
+    "shakeDurationUnit": "ms",
+    "popupDuration": 800,
+    "popupDurationUnit": "ms",
+    "particleLifespan": 500,
+    "particleLifespanUnit": "ms"
   },
   "colors": {
     "sky": "#87CEEB",
     "ground": "#1a1a3e",
     "pipe": "#2ecc40",
-    "cloud": "#ffffff"
+    "cloud": "#ffffff",
+    "uiBackground": "rgba(0, 0, 0, 0.7)",
+    "uiText": "#ffffff",
+    "uiAccent": "#FFD700",
+    "particle": "#ffffff"
   }
 }
